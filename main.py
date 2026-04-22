@@ -1,68 +1,43 @@
-import pandas as pd
 import json
+from google.cloud import pubsub_v1
+from datetime import datetime
 
-SHEET_URL = (
-    "https://docs.google.com/spreadsheets/d/"
-    "1til2yhjlsMEbOBuJs7LdrlHOC7vGplk45BJXnKlJD_g/"
-    "export?format=csv&gid=1169700979"
-)
+# initialize once (important for performance)
+publisher = pubsub_v1.PublisherClient()
+
+PROJECT_ID = "alubee-prod"
+TOPIC_ID = "production-loader-topic"
+TOPIC_PATH = publisher.topic_path(PROJECT_ID, TOPIC_ID)
 
 
-def get_google_sheet_data(request):
-    device_id = request.args.get("device_id")
-    if not device_id:
-        return json.dumps({"error": "Missing device_id"}), 400
-
-    device_id = str(device_id).strip()
-
-    df = pd.read_csv(
-        SHEET_URL,
-        dtype={"DeviceID": str}
-    )
-
-    df["DeviceID"] = df["DeviceID"].str.strip()
-
-    row = df[df["DeviceID"] == device_id]
-
-    if row.empty:
-        return json.dumps({"error": "DeviceID not found"}), 404
-
-    # Actual data order:
-    # DeviceID | Production_Plan | Part_No
-    production_plan_raw = row.iloc[0, 3]
-    part_no = str(row.iloc[0, 4]).strip()
-    shift = str(row.iloc[0, 7]).strip()
-    item_code = str(row.iloc[0, 5]).strip()
-    fixture = str(row.iloc[0, 6]).strip()
-    machine = str(row.iloc[0, 1]).strip()
-    unit = str(row.iloc[0, 2]).strip()
-    supervisor = str(row.iloc[0, 8]).strip()
-    department = str(row.iloc[0, 9]).strip()
-    cycle_time = str(row.iloc[0, 11]).strip()
-    assignee = str(row.iloc[0, 10]).strip()
+def publish_iot(request):
+    """
+    HTTP Cloud Function
+    Receives JSON and publishes to Pub/Sub
+    """
 
     try:
-        production_plan = int(float(str(production_plan_raw).strip()))
-    except Exception:
-        production_plan = 0
+        # get JSON body
+        request_json = request.get_json()
 
-    response = {
-        "DeviceID": device_id,
-        "Item_Code": item_code,
-        "Part_No": part_no,
-        "Production_Plan": production_plan,
-        "Machine": machine,
-        "Unit": unit,
-        "Shift": shift,
-        "Supervisor": supervisor,
-        "Department": department,
-        "Assignee": assignee,
-        "Fixture": fixture,
-        "Cycle_Time": cycle_time,
-    }
+        if request_json is None:
+            return {"error": "No JSON received"}, 400
 
-    return (
-        json.dumps(response),
-        200,
-        {"Content-Type": "application/json"}
-    )
+        # add server timestamp (VERY IMPORTANT for BigQuery ordering)
+        request_json["event_time"] = datetime.utcnow().isoformat()
+
+        # convert to bytes
+        data = json.dumps(request_json).encode("utf-8")
+
+        # publish
+        future = publisher.publish(TOPIC_PATH, data=data)
+        message_id = future.result()
+
+        return {
+            "status": "success",
+            "message_id": message_id,
+            "received": request_json
+        }, 200
+
+    except Exception as e:
+        return {"error": str(e)}, 500
