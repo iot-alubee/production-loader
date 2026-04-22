@@ -1,7 +1,4 @@
-# Cloud Functions (2nd gen) / Cloud Run: Python HTTP function
-# Build: docker build -t REGION-docker.pkg.dev/PROJECT/REPO/production-loader:latest .
-# Push and deploy via Artifact Registry + gcloud functions deploy --docker-image=...
-
+# Cloud Functions (2nd gen) / Cloud Run — HTTP handler from main.py
 FROM python:3.11-slim
 
 ENV PYTHONUNBUFFERED=1 \
@@ -17,5 +14,4 @@ COPY . .
 
 EXPOSE 8080
 
-# Target must match the HTTP function name in main.py
-CMD exec functions-framework --target=publish_iot --port="${PORT}" --signature-type=http
+CMD exec functions-framework --target=get_google_sheet_data --port="${PORT}" --signature-type=http
